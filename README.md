@@ -43,7 +43,7 @@ venv\Scripts\activate     # Windows
    export GROQ_API_KEY='your-api-key-here'
    ```
 
-* Streamlit Secrets(for cloud deployment):
+* **Streamlit Secrets(for cloud deployment):**
   
 * Create .streamlit/secrets.toml with:
   
@@ -52,7 +52,11 @@ venv\Scripts\activate     # Windows
     api_key = "your-api-key-here"
   ```
 
+## Usage
 
+```bash
+   streamlit run App.py
+```
 
 
 
