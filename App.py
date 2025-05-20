@@ -1,4 +1,12 @@
 import streamlit as st
+
+st.set_page_config(
+    page_title="Groq Content Generator",
+    layout="wide",
+    page_icon="🚀"
+)
+
+# Imports
 import requests
 import json
 import os
@@ -25,6 +33,25 @@ CONTENT_TYPES = [
     "Technical Documentation",
     "Custom Prompt"
 ]
+
+
+def initialize_app():
+    """Initialize the app configuration and session state"""
+    # Initialize session state
+    if 'content_history' not in st.session_state:
+        st.session_state.content_history = []
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = load_api_key()
+    if 'current_response' not in st.session_state:
+        st.session_state.current_response = None
+    if 'generation_in_progress' not in st.session_state:
+        st.session_state.generation_in_progress = False
+    if 'last_activity_time' not in st.session_state:
+        st.session_state.last_activity_time = time.time()
+    
+    # Update last activity time
+    st.session_state.last_activity_time = time.time()
+
 
 # Load API key from various sources
 def load_api_key():
@@ -53,29 +80,6 @@ def load_api_key():
         pass
         
     return None
-
-def initialize_app():
-    """Initialize the app configuration and session state"""
-    st.set_page_config(
-        page_title="Groq Content Generator",
-        layout="wide",
-        page_icon="🚀"
-    )
-    
-    # Initialize session state
-    if 'content_history' not in st.session_state:
-        st.session_state.content_history = []
-    if 'api_key' not in st.session_state:
-        st.session_state.api_key = load_api_key()
-    if 'current_response' not in st.session_state:
-        st.session_state.current_response = None
-    if 'generation_in_progress' not in st.session_state:
-        st.session_state.generation_in_progress = False
-    if 'last_activity_time' not in st.session_state:
-        st.session_state.last_activity_time = time.time()
-    
-    # Update last activity time
-    st.session_state.last_activity_time = time.time()
 
 def render_header():
     """Render the app header"""
