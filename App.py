@@ -3,18 +3,35 @@ import requests
 import json
 import os
 from datetime import datetime
-import configparser
-import pathlib
 
-# Config setup - attempt to load API key from config file
+# Config setup - attempt to load API key from Streamlit secrets or environment variable
 def load_api_key():
-    config = configparser.ConfigParser()
-    config_path = pathlib.Path('config.ini')
+    # Try to get from Streamlit secrets (for Streamlit Cloud)
+    try:
+        return st.secrets["groq_api_key"]
+    except:
+        pass
     
-    if config_path.exists():
-        config.read(config_path)
-        if 'API' in config and 'key' in config['API']:
-            return config['API']['key']
+    # Try to get from environment variable
+    api_key = os.environ.get("GROQ_API_KEY")
+    if api_key:
+        return api_key
+        
+    # If we're still here, check for a config file (local development)
+    try:
+        import configparser
+        import pathlib
+        
+        config = configparser.ConfigParser()
+        config_path = pathlib.Path('config.ini')
+        
+        if config_path.exists():
+            config.read(config_path)
+            if 'API' in config and 'key' in config['API']:
+                return config['API']['key']
+    except:
+        pass
+        
     return ""
 
 st.set_page_config(page_title="Groq Content Generator", layout="wide")
@@ -45,14 +62,14 @@ st.markdown("Generate various types of content using the Groq API")
 with st.sidebar:
     st.header("API Configuration")
     
-    # Load API key from config file
+    # Load API key from various sources
     api_key = load_api_key()
     
-    # API Key input with secure handling
+    # API Key input with secure handling (for local development)
     api_key_input = st.text_input("Enter your Groq API Key", 
                               value=api_key if api_key else "",
                               type="password",
-                              help="Your API key will be stored locally in config.ini")
+                              help="For Streamlit Cloud deployment, set this in your secrets")
     
     # Model selection
     model = st.selectbox(
@@ -66,23 +83,12 @@ with st.sidebar:
         ]
     )
     
-    # Save API key to config file and session state
-    if st.button("Save API Key"):
-        if api_key_input:
-            config = configparser.ConfigParser()
-            config['API'] = {'key': api_key_input}
-            
-            with open('config.ini', 'w') as f:
-                config.write(f)
-                
-            st.session_state['api_key'] = api_key_input
-            st.success("API Key saved to config.ini!")
-        else:
-            st.error("Please enter an API key")
-    
-    # If API key exists in session state or was just loaded from file
+    # Use API key from input if provided
     if api_key_input:
         st.session_state['api_key'] = api_key_input
+    # Otherwise use the one loaded from secrets/env/config
+    elif api_key:
+        st.session_state['api_key'] = api_key
     
     st.markdown("---")
     
