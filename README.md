@@ -26,6 +26,30 @@ venv\Scripts\activate     # Windows
 ```
 
 3. Install Dependencies
-```bash
+   ```bash
    pip install -r requirements.txt
 ```
+
+## Configuration ⚙️
+
+1. Obtain your Groq API key from console.groq.com
+
+2. Set up your API key using one of these methods:
+
+* **Environment Variable:**
+   ```bash
+   export GROQ_API_KEY='your-api-key-here'
+   ```
+
+* Streamlit Secrets(for cloud deployment):
+   Create .streamlit/secrets.toml with:
+  ```bash
+    [groq]
+api_key = "your-api-key-here"
+```
+
+
+
+
+
+
