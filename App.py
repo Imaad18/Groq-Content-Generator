@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import json
 import os
+import pathlib
+import configparser
 from datetime import datetime
 
 # Config setup - attempt to load API key from Streamlit secrets or environment variable
@@ -19,9 +21,6 @@ def load_api_key():
         
     # If we're still here, check for a config file (local development)
     try:
-        import configparser
-        import pathlib
-        
         config = configparser.ConfigParser()
         config_path = pathlib.Path('config.ini')
         
@@ -222,8 +221,51 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Function to call Groq API
+def call_groq_api(prompt, temperature, model, max_tokens):
+    if not st.session_state.get('api_key'):
+        return "Please enter your Groq API key in the sidebar and save it."
+    
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {st.session_state['api_key']}"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are a professional content creator that specializes in creating high-quality, engaging content."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            data=json.dumps(payload)
+        )  # Fixed: Added missing closing parenthesis
+        
+        if response.status_code == 200:
+            response_json = response.json()
+            return response_json["choices"][0]["message"]["content"]
+        else:
+            return f"Error: {response.status_code} - {response.text}"
+            
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
+
 # Load API key from various sources
 api_key = load_api_key()
+
+# Initialize session state for history
+if 'content_history' not in st.session_state:
+    st.session_state['content_history'] = []
+
+if 'delete_index' not in st.session_state:
+    st.session_state['delete_index'] = None
 
 # App header with gradient background
 st.markdown("""
@@ -433,41 +475,6 @@ with col1:
                     st.session_state['content_type'] = content_type
                     st.experimental_rerun()
 
-# Function to call Groq API
-def call_groq_api(prompt, temperature, model, max_tokens):
-    if not st.session_state.get('api_key'):
-        return "Please enter your Groq API key in the sidebar and save it."
-    
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {st.session_state['api_key']}"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a professional content creator that specializes in creating high-quality, engaging content."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
-        
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            data=json.dumps(payload)
-        
-        if response.status_code == 200:
-            response_json = response.json()
-            return response_json["choices"][0]["message"]["content"]
-        else:
-            return f"Error: {response.status_code} - {response.text}"
-            
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
-
 # Display the output in the second column
 with col2:
     if 'current_response' in st.session_state:
@@ -475,7 +482,7 @@ with col2:
             st.markdown('<div class="output-container">', unsafe_allow_html=True)
             
             # Output header with timestamp and type
-            st.markdown("""
+            st.markdown(f"""
             <div class="output-header">
                 <div>
                     <h3>📄 Generated Content</h3>
@@ -486,7 +493,7 @@ with col2:
             """, unsafe_allow_html=True)
             
             # The generated content
-            st.markdown(st.session_state['current_response'], unsafe_allow_html=True)
+            st.markdown(st.session_state['current_response'])
             
             st.markdown('</div>', unsafe_allow_html=True)  # Close output-container
             
@@ -496,11 +503,32 @@ with col2:
                 output_format = st.selectbox("**Download Format**", ["TXT", "MD", "HTML", "JSON"])
             with col_d2:
                 download_disabled = 'current_response' not in st.session_state
+                
+                # Fix: Properly set file extension and MIME type based on selected format
+                format_mappings = {
+                    "TXT": {"ext": "txt", "mime": "text/plain"},
+                    "MD": {"ext": "md", "mime": "text/markdown"},
+                    "HTML": {"ext": "html", "mime": "text/html"},
+                    "JSON": {"ext": "json", "mime": "application/json"}
+                }
+                
+                # For JSON format, wrap content in a JSON structure
+                download_content = st.session_state['current_response']
+                if output_format == "JSON":
+                    download_content = json.dumps({
+                        "content": st.session_state['current_response'],
+                        "metadata": {
+                            "content_type": st.session_state.get('content_type', ''),
+                            "generation_time": st.session_state.get('generation_time', ''),
+                            "model": model
+                        }
+                    }, indent=2)
+                
                 st.download_button(
                     label="💾 Download",
-                    data=st.session_state['current_response'],
-                    file_name=f"groq_{st.session_state.get('content_type', 'content').replace(' ', '_').lower()}_{datetime.now().strftime('%Y%m%d')}.{output_format.lower()}",
-                    mime=f"text/{output_format.lower()}",
+                    data=download_content,
+                    file_name=f"groq_{st.session_state.get('content_type', 'content').replace(' ', '_').lower()}_{datetime.now().strftime('%Y%m%d')}.{format_mappings[output_format]['ext']}",
+                    mime=format_mappings[output_format]['mime'],
                     use_container_width=True,
                     key="download_btn",
                     disabled=download_disabled
@@ -512,7 +540,7 @@ with col2:
                     st.session_state['content_history'] = []
                 
                 st.session_state['content_history'].append({
-                    'type': content_type,
+                    'type': st.session_state.get('content_type', ''),
                     'prompt': st.session_state.get('current_prompt', ''),
                     'response': st.session_state['current_response'],
                     'timestamp': st.session_state.get('generation_time', '')
@@ -530,46 +558,26 @@ if st.checkbox("📚 Show Content History", key="show_history"):
         # Reverse to show newest first
         for i, item in enumerate(reversed(st.session_state['content_history'])):
             with st.container():
-                st.markdown(f"""
-                <div class="history-item">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <strong>{item['type']}</strong>
-                            <span style="color: var(--light-text); font-size: 0.8rem; margin-left: 8px;">{item['timestamp']}</span>
-                        </div>
-                        <div>
-                            <button onclick="deleteHistoryItem({len(st.session_state['content_history']) - i - 1})" style="background: none; border: none; color: var(--danger); cursor: pointer;">🗑️</button>
-                        </div>
-                    </div>
-                    <div style="margin-top: 8px;">
-                        <details>
-                            <summary>View Content</summary>
-                            <div style="margin-top: 12px; padding: 12px; background-color: #f8f9fa; border-radius: 8px;">
-                                {item['response']}
-                            </div>
-                        </details>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        # JavaScript for deleting history items
-        st.markdown("""
-        <script>
-        function deleteHistoryItem(index) {
-            // This will trigger a Streamlit rerun with the index to delete
-            window.parent.postMessage({
-                isStreamlitMessage: true,
-                type: "script",
-                script: "st.session_state['delete_index'] = " + index + "; st.experimental_rerun()"
-            }, "*");
-        }
-        </script>
-        """, unsafe_allow_html=True)
+                col_hist1, col_hist2 = st.columns([5, 1])
+                
+                with col_hist1:
+                    st.markdown(f"**{item['type']}** - {item['timestamp']}")
+                
+                with col_hist2:
+                    # Fixed: Using Streamlit's built-in functionality for deletion instead of JavaScript
+                    if st.button("🗑️ Delete", key=f"del_{i}"):
+                        st.session_state['delete_index'] = len(st.session_state['content_history']) - i - 1
+                        st.experimental_rerun()
+                
+                with st.expander("View Content"):
+                    st.markdown(item['response'])
+                
+                st.markdown("---")
         
         # Handle deletion if triggered
-        if 'delete_index' in st.session_state:
+        if st.session_state['delete_index'] is not None:
             st.session_state['content_history'].pop(st.session_state['delete_index'])
-            del st.session_state['delete_index']
+            st.session_state['delete_index'] = None
             st.experimental_rerun()
 
 # Footer
