@@ -26,7 +26,6 @@ venv\Scripts\activate     # Windows
 ```
 
 3. Install Dependencies
-
    ```bash
    pip install -r requirements.txt
 ```
@@ -58,6 +57,12 @@ venv\Scripts\activate     # Windows
    streamlit run App.py
 ```
 
+## The interface includes:
 
+* **Sidebar:** Configure model, content type, and advanced settings
+
+* **Main Panel:** Input content parameters and view generated output
+
+* **History Section:** Access previous generations
 
 
