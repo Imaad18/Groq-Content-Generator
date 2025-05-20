@@ -5,149 +5,102 @@ import os
 import pathlib
 import configparser
 from datetime import datetime
+from functools import lru_cache
 
-# Config setup - attempt to load API key from Streamlit secrets or environment variable
+# Constants
+MODELS = [
+    "llama3-70b-8192",
+    "mixtral-8x7b-32768",
+    "gemma-7b-it"
+]
+
+CONTENT_TYPES = [
+    "Blog Post",
+    "Social Media Post",
+    "Email Newsletter",
+    "Product Description",
+    "Marketing Copy",
+    "Creative Story",
+    "Technical Documentation",
+    "Custom Prompt"
+]
+
+# Cache API key loading to avoid repeated checks
+@lru_cache(maxsize=1)
 def load_api_key():
-    # Try to get from Streamlit secrets (for Streamlit Cloud)
+    """Load API key from various sources with caching"""
+    # Try Streamlit secrets first
     try:
-        return st.secrets["groq"]["api_key"]  # Fixed: Proper secrets structure
-    except:
+        if "groq" in st.secrets and "api_key" in st.secrets["groq"]:
+            return st.secrets["groq"]["api_key"]
+    except Exception:
         pass
     
-    # Try to get from environment variable
+    # Try environment variable
     api_key = os.environ.get("GROQ_API_KEY")
     if api_key:
         return api_key
         
-    # If we're still here, check for a config file (local development)
+    # Try config file
     try:
         config = configparser.ConfigParser()
         config_path = pathlib.Path('config.ini')
-        
         if config_path.exists():
             config.read(config_path)
-            if 'GROQ' in config and 'API_KEY' in config['GROQ']:  # Fixed: Consistent naming
+            if config.has_section('GROQ') and 'API_KEY' in config['GROQ']:
                 return config['GROQ']['API_KEY']
-    except Exception as e:
-        st.error(f"Error reading config: {str(e)}")
+    except Exception:
+        pass
         
-    return None  # Fixed: Return None instead of empty string
+    return None
 
-# Initialize session state variables
-def init_session_state():
-    if 'content_history' not in st.session_state:
-        st.session_state['content_history'] = []
-    if 'delete_index' not in st.session_state:
-        st.session_state['delete_index'] = None
-    if 'api_key' not in st.session_state:
-        st.session_state['api_key'] = load_api_key()
-
-# Function to call Groq API with error handling
-def call_groq_api(prompt, temperature, model, max_tokens):
-    if not st.session_state.get('api_key'):
-        st.error("Please enter your Groq API key in the sidebar and save it.")
-        return None
-    
-    try:
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {st.session_state['api_key']}"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": "You are a professional content creator that specializes in creating high-quality, engaging content."},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
-        
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,  # Fixed: Use json parameter instead of data
-            timeout=30  # Added timeout
-        )
-        
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        else:
-            st.error(f"API Error: {response.status_code} - {response.text}")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Request failed: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
-        return None
-
-# Main app function
-def main():
+def initialize_app():
+    """Initialize the app configuration and session state"""
     st.set_page_config(
         page_title="Groq Content Generator",
         layout="wide",
         page_icon="🚀"
     )
-
-    # Load custom CSS
-    with open("style.css") as f:  # Moved CSS to external file
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
     
     # Initialize session state
-    init_session_state()
-    
-    # App header
+    if 'content_history' not in st.session_state:
+        st.session_state.content_history = []
+    if 'api_key' not in st.session_state:
+        st.session_state.api_key = load_api_key()
+    if 'current_response' not in st.session_state:
+        st.session_state.current_response = None
+
+def render_header():
+    """Render the app header"""
     st.markdown("""
     <div class="header-card">
         <h1>🚀 Groq Content Generator</h1>
         <p>Create high-quality content powered by Groq's cutting-edge AI models</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    # Sidebar configuration
+
+def render_sidebar():
+    """Render the sidebar configuration"""
     with st.sidebar:
         st.markdown('<div class="sidebar-header">Configuration</div>', unsafe_allow_html=True)
         
         # API Key input
-        api_key_input = st.text_input(
+        api_key = st.text_input(
             "**Groq API Key**",
             value=st.session_state.get('api_key', ''),
             type="password",
-            help="For Streamlit Cloud deployment, set this in your secrets"
+            help="Get your API key from Groq's console"
         )
         
-        if api_key_input and api_key_input != st.session_state.get('api_key'):
-            st.session_state['api_key'] = api_key_input
+        if api_key and api_key != st.session_state.get('api_key'):
+            st.session_state.api_key = api_key
             st.success("API key updated!")
         
-        # Model and content type selection
-        model = st.selectbox(
-            "**Select Model**",
-            [
-                "llama3-70b-8192",
-                "mixtral-8x7b-32768",
-                "gemma-7b-it"
-            ],
-            index=0  # Default to first option
-        )
+        # Model selection
+        model = st.selectbox("**Select Model**", MODELS, index=0)
         
-        content_type = st.selectbox(
-            "**Content Type**",
-            [
-                "Blog Post",
-                "Social Media Post",
-                "Email Newsletter",
-                "Product Description",
-                "Marketing Copy",
-                "Creative Story",
-                "Technical Documentation",
-                "Custom Prompt"
-            ],
-            index=0  # Default to first option
-        )
+        # Content type selection
+        content_type = st.selectbox("**Content Type**", CONTENT_TYPES, index=0)
         
         # Advanced settings
         with st.expander("Advanced Settings"):
@@ -163,184 +116,295 @@ def main():
                 help="Limit the length of the generated response"
             )
     
-    # Main content area
-    col1, col2 = st.columns([1, 1], gap="large")
+    return {
+        'model': model,
+        'content_type': content_type,
+        'temperature': temperature,
+        'max_tokens': max_tokens
+    }
 
-    with col1:
-        prompt = generate_prompt_form(content_type)
+def generate_prompt(content_type):
+    """Generate prompt based on content type"""
+    prompt = ""
+    
+    if content_type == "Blog Post":
+        topic = st.text_input("**Topic**", placeholder="E.g., Artificial Intelligence Trends")
+        tone = st.selectbox("**Tone**", ["Informative", "Casual", "Professional", "Enthusiastic"])
+        word_count = st.slider("**Approximate Word Count**", 300, 2000, 800)
+        include_headers = st.checkbox("**Include Section Headers**", value=True)
+        include_conclusion = st.checkbox("**Include Conclusion**", value=True)
         
-        if st.button("✨ Generate Content", type="primary", use_container_width=True):
-            if not st.session_state.get('api_key'):
-                st.error("Please enter your Groq API key first.")
-            elif not prompt.strip():
-                st.error("Please provide a valid prompt.")
-            else:
-                with st.spinner("Generating content..."):
-                    response = call_groq_api(prompt, temperature, model, max_tokens)
-                    if response:
-                        st.session_state.update({
-                            'current_response': response,
-                            'current_prompt': prompt,
-                            'generation_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'content_type': content_type
-                        })
-                        st.experimental_rerun()
+        prompt = f"""Write a {tone.lower()} blog post about {topic}. 
+        The post should be approximately {word_count} words.
+        {"Include section headers to organize the content." if include_headers else ""}
+        {"Include a conclusion section at the end." if include_conclusion else ""}
+        Make it engaging, informative, and well-structured."""
+        
+    elif content_type == "Social Media Post":
+        platform = st.selectbox("**Platform**", ["LinkedIn", "Twitter/X", "Instagram", "Facebook"])
+        topic = st.text_input("**Topic**", placeholder="E.g., Product Launch")
+        include_hashtags = st.checkbox("**Include Hashtags**", value=True)
+        
+        char_limits = {
+            "Twitter/X": 280,
+            "LinkedIn": 3000,
+            "Instagram": 2200,
+            "Facebook": 5000
+        }
+        
+        post_length = st.slider("**Length (characters)**", 100, char_limits[platform], min(500, char_limits[platform]))
+        
+        prompt = f"""Create a compelling {platform} post about {topic}.
+        Keep it under {post_length} characters.
+        {"Include relevant hashtags." if include_hashtags else ""}
+        Make it attention-grabbing and designed for maximum engagement."""
+        
+    elif content_type == "Email Newsletter":
+        purpose = st.selectbox("**Purpose**", ["Promotional", "Informational", "Newsletter", "Announcement"])
+        audience = st.text_input("**Target Audience**", placeholder="E.g., Tech Professionals")
+        call_to_action = st.text_input("**Call to Action**", placeholder="E.g., Visit our website")
+        
+        prompt = f"""Write a {purpose.lower()} email newsletter targeting {audience}.
+        Include a compelling subject line and body content.
+        {"End with a clear call to action: " + call_to_action if call_to_action else ""}
+        Make it professional yet engaging."""
+    
+    else:  # Custom Prompt
+        prompt = st.text_area("**Enter your custom prompt**", height=200, 
+                            placeholder="Be specific about what content you want generated...")
+    
+    additional_instructions = st.text_area("**Additional Instructions** (optional)", 
+                                        placeholder="Any other specifications or requirements...")
+    
+    if additional_instructions:
+        prompt += f"\n\nAdditional instructions: {additional_instructions}"
+    
+    return prompt
 
+def call_groq_api(prompt, config):
+    """Call Groq API with proper error handling"""
+    if not st.session_state.api_key:
+        st.error("Please enter your Groq API key in the sidebar and save it.")
+        return None
+    
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {st.session_state.api_key}"
+        }
+        
+        payload = {
+            "model": config['model'],
+            "messages": [
+                {
+                    "role": "system", 
+                    "content": "You are a professional content creator that specializes in creating high-quality, engaging content."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            "temperature": config['temperature'],
+            "max_tokens": config['max_tokens']
+        }
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+        
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        return None
+
+def render_content_output():
+    """Render the content output section"""
+    if not st.session_state.current_response:
+        return
+    
+    with st.container():
+        st.markdown("""
+        <div class="output-container">
+            <div class="output-header">
+                <div>
+                    <h3>📄 Generated Content</h3>
+                    <span class="tag">%s</span>
+                    <span style="color: var(--light-text); font-size: 0.9rem;">%s</span>
+                </div>
+            </div>
+            %s
+        </div>
+        """ % (
+            st.session_state.get('content_type', ''),
+            st.session_state.get('generation_time', ''),
+            st.session_state.current_response
+        ), unsafe_allow_html=True)
+        
+        # Download options
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            output_format = st.selectbox("**Download Format**", ["TXT", "MD", "HTML", "JSON"])
+        with col2:
+            format_mappings = {
+                "TXT": {"ext": "txt", "mime": "text/plain"},
+                "MD": {"ext": "md", "mime": "text/markdown"},
+                "HTML": {"ext": "html", "mime": "text/html"},
+                "JSON": {"ext": "json", "mime": "application/json"}
+            }
+            
+            download_content = st.session_state.current_response
+            if output_format == "JSON":
+                download_content = json.dumps({
+                    "content": download_content,
+                    "metadata": {
+                        "content_type": st.session_state.get('content_type', ''),
+                        "generation_time": st.session_state.get('generation_time', ''),
+                        "model": st.session_state.get('model', 'llama3-70b-8192')
+                    }
+                }, indent=2)
+            
+            st.download_button(
+                label="💾 Download",
+                data=download_content,
+                file_name=f"groq_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_mappings[output_format]['ext']}",
+                mime=format_mappings[output_format]['mime'],
+                use_container_width=True
+            )
+        
+        if st.button("💾 Save to History", use_container_width=True):
+            st.session_state.content_history.append({
+                'type': st.session_state.get('content_type', ''),
+                'prompt': st.session_state.get('current_prompt', ''),
+                'response': st.session_state.current_response,
+                'timestamp': st.session_state.get('generation_time', '')
+            })
+            st.success("Content saved to history")
+
+def render_content_history():
+    """Render the content history section"""
+    st.subheader("Content History")
+    
+    if not st.session_state.content_history:
+        st.info("No content history yet. Generate and save content to see it here.")
+        return
+    
+    for i, item in enumerate(reversed(st.session_state.content_history)):
+        with st.container():
+            col1, col2 = st.columns([5, 1])
+            
+            with col1:
+                st.markdown(f"**{item['type']}** - {item['timestamp']}")
+            
+            with col2:
+                if st.button("🗑️ Delete", key=f"del_{i}"):
+                    del st.session_state.content_history[len(st.session_state.content_history) - i - 1]
+                    st.experimental_rerun()
+            
+            with st.expander("View Content"):
+                st.markdown(item['response'])
+            
+            st.markdown("---")
+
+def main():
+    """Main app function"""
+    # Load CSS (inline for deployment simplicity)
+    st.markdown("""
+    <style>
+    .header-card {
+        background-color: #0e1117;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .sidebar-header {
+        font-size: 1.25rem;
+        font-weight: bold;
+        margin-bottom: 1rem;
+        color: #ffffff;
+    }
+    .output-container {
+        background-color: #0e1117;
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        margin-bottom: 1.5rem;
+    }
+    .output-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    .tag {
+        background-color: #4a6fa5;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.8rem;
+        margin-left: 0.5rem;
+    }
+    .footer {
+        margin-top: 2rem;
+        text-align: center;
+        color: #6c757d;
+        font-size: 0.9rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    initialize_app()
+    render_header()
+    
+    # Get sidebar configuration
+    config = render_sidebar()
+    
+    # Main content columns
+    col1, col2 = st.columns([1, 1], gap="large")
+    
+    with col1:
+        with st.container():
+            st.subheader("📝 Content Parameters")
+            prompt = generate_prompt(config['content_type'])
+            
+            if st.button("✨ Generate Content", type="primary", use_container_width=True):
+                if not st.session_state.api_key:
+                    st.error("Please enter your Groq API key first.")
+                elif not prompt.strip():
+                    st.error("Please provide a valid prompt.")
+                else:
+                    with st.spinner("Generating content..."):
+                        response = call_groq_api(prompt, config)
+                        if response:
+                            st.session_state.update({
+                                'current_response': response,
+                                'current_prompt': prompt,
+                                'generation_time': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                'content_type': config['content_type'],
+                                'model': config['model']
+                            })
+                            st.experimental_rerun()
+    
     with col2:
-        display_output_content()
-
+        render_content_output()
+    
     # Content history section
     if st.checkbox("📚 Show Content History"):
-        display_content_history()
-
+        render_content_history()
+    
     # Footer
     st.markdown("""
     <div class="footer">
         <p>Built with ❤️ using Streamlit and powered by Groq API</p>
     </div>
     """, unsafe_allow_html=True)
-
-# Helper function to generate prompt based on content type
-def generate_prompt_form(content_type):
-    with st.container():
-        st.markdown('<div class="content-card">', unsafe_allow_html=True)
-        st.subheader("📝 Content Parameters")
-        
-        prompt = ""
-        
-        if content_type == "Blog Post":
-            topic = st.text_input("**Topic**", placeholder="E.g., Artificial Intelligence Trends")
-            tone = st.selectbox("**Tone**", ["Informative", "Casual", "Professional", "Enthusiastic"])
-            word_count = st.slider("**Approximate Word Count**", 300, 2000, 800)
-            include_headers = st.checkbox("**Include Section Headers**", value=True)
-            include_conclusion = st.checkbox("**Include Conclusion**", value=True)
-            
-            prompt = f"""Write a {tone.lower()} blog post about {topic}. 
-            The post should be approximately {word_count} words.
-            {"Include section headers to organize the content." if include_headers else ""}
-            {"Include a conclusion section at the end." if include_conclusion else ""}
-            Make it engaging, informative, and well-structured."""
-            
-        elif content_type == "Social Media Post":
-            platform = st.selectbox("**Platform**", ["LinkedIn", "Twitter/X", "Instagram", "Facebook"])
-            topic = st.text_input("**Topic**", placeholder="E.g., Product Launch")
-            include_hashtags = st.checkbox("**Include Hashtags**", value=True)
-            
-            char_limits = {
-                "Twitter/X": 280,
-                "LinkedIn": 3000,
-                "Instagram": 2200,
-                "Facebook": 5000
-            }
-            
-            post_length = st.slider("**Length (characters)**", 100, char_limits[platform], min(500, char_limits[platform]))
-            
-            prompt = f"""Create a compelling {platform} post about {topic}.
-            Keep it under {post_length} characters.
-            {"Include relevant hashtags." if include_hashtags else ""}
-            Make it attention-grabbing and designed for maximum engagement."""
-            
-        # ... (other content type cases remain similar but should be similarly structured)
-        
-        else:  # Custom Prompt
-            prompt = st.text_area("**Enter your custom prompt**", height=200, 
-                                placeholder="Be specific about what content you want generated...")
-
-        additional_instructions = st.text_area("**Additional Instructions** (optional)", 
-                                            placeholder="Any other specifications or requirements...")
-        
-        if additional_instructions:
-            prompt += f"\n\nAdditional instructions: {additional_instructions}"
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        return prompt
-
-# Helper function to display output content
-def display_output_content():
-    if 'current_response' in st.session_state:
-        with st.container():
-            st.markdown('<div class="output-container">', unsafe_allow_html=True)
-            
-            st.markdown(f"""
-            <div class="output-header">
-                <div>
-                    <h3>📄 Generated Content</h3>
-                    <span class="tag">{st.session_state.get('content_type', '')}</span>
-                    <span style="color: var(--light-text); font-size: 0.9rem;">
-                        {st.session_state.get('generation_time', '')}
-                    </span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(st.session_state['current_response'])
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Download options
-            col_d1, col_d2 = st.columns([3, 1])
-            with col_d1:
-                output_format = st.selectbox("**Download Format**", ["TXT", "MD", "HTML", "JSON"])
-            with col_d2:
-                format_mappings = {
-                    "TXT": {"ext": "txt", "mime": "text/plain"},
-                    "MD": {"ext": "md", "mime": "text/markdown"},
-                    "HTML": {"ext": "html", "mime": "text/html"},
-                    "JSON": {"ext": "json", "mime": "application/json"}
-                }
-                
-                download_content = st.session_state['current_response']
-                if output_format == "JSON":
-                    download_content = json.dumps({
-                        "content": download_content,
-                        "metadata": {
-                            "content_type": st.session_state.get('content_type', ''),
-                            "generation_time": st.session_state.get('generation_time', ''),
-                            "model": "llama3-70b-8192"  # Default model
-                        }
-                    }, indent=2)
-                
-                st.download_button(
-                    label="💾 Download",
-                    data=download_content,
-                    file_name=f"groq_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{format_mappings[output_format]['ext']}",
-                    mime=format_mappings[output_format]['mime'],
-                    use_container_width=True,
-                    key="download_btn"
-                )
-            
-            if st.button("💾 Save to History", use_container_width=True):
-                st.session_state['content_history'].append({
-                    'type': st.session_state.get('content_type', ''),
-                    'prompt': st.session_state.get('current_prompt', ''),
-                    'response': st.session_state['current_response'],
-                    'timestamp': st.session_state.get('generation_time', '')
-                })
-                st.success("Content saved to history")
-
-# Helper function to display content history
-def display_content_history():
-    st.subheader("Content History")
-    
-    if not st.session_state['content_history']:
-        st.info("No content history yet. Generate and save content to see it here.")
-    else:
-        for i, item in enumerate(reversed(st.session_state['content_history'])):
-            with st.container():
-                col_hist1, col_hist2 = st.columns([5, 1])
-                
-                with col_hist1:
-                    st.markdown(f"**{item['type']}** - {item['timestamp']}")
-                
-                with col_hist2:
-                    if st.button("🗑️ Delete", key=f"del_{i}"):
-                        st.session_state['content_history'].pop(len(st.session_state['content_history']) - i - 1)
-                        st.experimental_rerun()
-                
-                with st.expander("View Content"):
-                    st.markdown(item['response'])
-                
-                st.markdown("---")
 
 if __name__ == "__main__":
     main()
