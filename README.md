@@ -5,7 +5,7 @@
 # Live Demo in Web App:
 https://grok-content-generator-2gznr8bxbxdf76j6cjwaqe.streamlit.app/
 
-# Grok-Content-Generator  🚀
+# Groq-Content-Generator  🚀
 
 * A powerful Streamlit application that leverages Groq's ultra-fast LLMs to generate high-quality content for various use cases.
 
